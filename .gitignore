@@ -1,1 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+.env
+.venv
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_convert
+
+# IDEs/editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data (raw + processed)
+data/raw/
+data/processed/
+data/metadata/*.csv
+
+# Experiment artifacts
+runs/
+wandb/
+mlruns/
+*.log
+*.out
+
+# Results generated automatically
+results/experiments.csv
+results/tables/
+results/figures/
+results/galleries/
+
+# OS files
+.DS_Store
+Thumbs.db
 
