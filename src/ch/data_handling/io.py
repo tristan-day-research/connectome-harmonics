@@ -1,23 +1,22 @@
-import scipy
-import pandas as pd
-import os
+from __future__ import annotations
+
+from pathlib import Path
 from datetime import datetime
+from typing import Any, Dict, Tuple
+
 import pickle
-from scipy import io
-from .settings import load_settings
+
+import pandas as pd
+import scipy
 
 
-def get_nets_and_ages():
-    """Load networks and ages from the configured MATLAB file.
-
-    Uses `CH_DATA_ROOT` and `CH_MAT_FILENAME` (or defaults) via settings.
-    """
-    s = load_settings()
-    mat = scipy.io.loadmat(str(s.mat_path))
+def get_nets_and_ages(mat_path: Path | str) -> Tuple[Any, Any]:
+    """Load networks and ages from a MATLAB file at `mat_path`."""
+    mat = scipy.io.loadmat(str(mat_path))
     return mat["nets"], mat["age"].flatten()
 
 
-def save_dict_as_pickle(dictionary, filename):
+def save_dict_as_pickle(dictionary: Dict[str, Any], filename: Path | str) -> None:
     """
     Save a dictionary into a pickle file.
 
@@ -29,7 +28,7 @@ def save_dict_as_pickle(dictionary, filename):
         pickle.dump(dictionary, file)
 
 
-def load_dict_from_pickle(path, filename):
+def load_dict_from_pickle(path: Path | str, filename: str) -> Dict[str, Any]:
     """
     Load a dictionary from a pickle file.
 
@@ -40,13 +39,18 @@ def load_dict_from_pickle(path, filename):
     Returns:
     - dict: The dictionary loaded from the pickle file.
     """
-    full_path = os.path.join(path, filename)
+    full_path = Path(path) / filename
     with open(full_path, 'rb') as file:
         print(f"Loading {filename}")
         return pickle.load(file)
 
 
-def add_column_from_dict(df, column_name, data_dict):
+def add_column_from_dict(
+    df: pd.DataFrame,
+    column_name: str,
+    data_dict: Dict[Any, Any],
+    backups_dir: Path | str | None = None,
+) -> pd.DataFrame:
     """
     Adds a new column to a DataFrame using values from a dictionary.
     
@@ -59,15 +63,18 @@ def add_column_from_dict(df, column_name, data_dict):
     - pd.DataFrame: DataFrame with the new column added.
     """
 
-    # Backup the existing metadata_df into the configured backups folder
-    s = load_settings()
-    backup_dataframe(df, backup_dir=str(s.backups_dir))
+    # Optional backup of the existing dataframe
+    if backups_dir is not None:
+        backup_dataframe(df, backup_dir=backups_dir)
 
     df[column_name] = df.index.map(data_dict)
     return df
 
 
-def backup_dataframe(df, backup_dir='data/backups'):
+def backup_dataframe(
+    df: pd.DataFrame,
+    backup_dir: Path | str | None = None,
+) -> Path:
     """
     Backs up a dataframe to a specified directory with a timestamp.
     
@@ -78,13 +85,21 @@ def backup_dataframe(df, backup_dir='data/backups'):
     Returns:
     - str: Path to the backup file.
     """
-    # Check if backup directory exists, if not create it
-    if not os.path.exists(backup_dir):
-        os.makedirs(backup_dir)
+    # Resolve backup directory: default to settings.backups_dir (repo-root based)
+    if backup_dir is None:
+        try:
+            from ch.settings import load_settings
+            backup_dir = load_settings().backups_dir
+        except Exception:
+            # Fallback to a repo-root-like relative path if settings import fails
+            backup_dir = Path("data/backups")
+    else:
+        backup_dir = Path(backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
     
     # Format the current time as YYYYMMDD_HHMMSS for uniqueness
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_path = os.path.join(backup_dir, f'metadata_backup_{timestamp}.csv')
+    backup_path = backup_dir / f'metadata_backup_{timestamp}.csv'
     
     # Save the dataframe to a csv file
     df.to_csv(backup_path)
@@ -92,7 +107,8 @@ def backup_dataframe(df, backup_dir='data/backups'):
     return backup_path
 
 
-def load_matlab_file(filename):
+def load_matlab_file(filename: Path | str) -> Dict[str, Any]:
+    filename = str(filename)
     data = scipy.io.loadmat(filename)
     print("Data keys:")
     print(list(data.keys()))

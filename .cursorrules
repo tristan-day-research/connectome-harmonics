@@ -1,0 +1,46 @@
+# Cursor Rules for Connectome Harmonics Project
+
+## Code Style & Architecture Rules
+
+### Data Loading Functions
+- NEVER put settings loading inside helper/data utility functions
+- Helper functions should take explicit paths as parameters
+- Load settings at the application level, not in utility functions
+- Use type hints for all function parameters
+- Prefer pure functions that are easy to test
+
+### File Organization
+- Keep __init__.py files minimal - only essential imports
+- Put convenience functions in separate modules, not __init__.py
+- Use explicit imports, avoid wildcard imports
+- Separate low-level utilities from high-level convenience functions
+
+### Settings Usage
+- Load settings once at application startup
+- Pass explicit paths to utility functions
+- Create convenience wrappers if needed, but keep them separate
+- Settings should be injected, not imported inside functions
+
+### Examples of BAD patterns to avoid:
+```python
+# DON'T DO THIS
+def load_data(settings=None):
+    if settings is None:
+        from ch.settings import load_settings  # ❌ Hidden dependency
+        settings = load_settings()
+```
+
+### Examples of GOOD patterns:
+```python
+# DO THIS
+def load_data(data_path: Union[str, Path]) -> DataFrame:
+    """Load data from explicit path."""
+    return pd.read_parquet(data_path)
+```
+
+## Project-Specific Rules
+- Use xarray for multi-dimensional data
+- Use parquet for metadata (fast, compressed)
+- Use zarr for large arrays (efficient, chunked)
+- Always provide type hints
+- Write docstrings with Parameters/Returns sections

@@ -14,6 +14,11 @@ except Exception as exc:  # pragma: no cover
 ENV_PREFIX = "CH_"
 
 
+# Resolve repository root regardless of current working directory
+# src/ch/settings.py -> src -> repo root
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
 class Settings(BaseSettings):
     """Single-source project configuration.
 
@@ -23,14 +28,18 @@ class Settings(BaseSettings):
         CH_DATA_ROOT=/abs/data CH_LAP_TYPE=combinatorial
     """
 
-    # Paths
+    # Paths (default relative to repository root, not CWD)
     data_root: Path = Path("data")
-    raw_dir: Path = Path("data/raw")
-    processed_dir: Path = Path("data/processed")
-    backups_dir: Path = Path("data/backups")
+    raw_dir: Path = data_root / "raw"
+    processed_dir: Path = data_root / "processed"
+    backups_dir: Path = data_root / "backups"
+    metadata_dir:Path = data_root / "metadata"
 
-    # Data files
-    mat_filename: str = "nhw2022-network-harmonics-data.mat"
+    # Object paths
+    camcan_raw: Path = raw_dir / "raw_data_nhw2022-network-harmonics-data.mat"
+    metadata_parquet: Path = metadata_dir / "subject_metadata.parquet"
+    connectivity_parquet: Path = processed_dir / "connectivity_matrices.parquet"
+    harmonics_parquet: Path = processed_dir / "connectome_harmonics.parquet"
 
     # Algorithm defaults
     lap_type: str = "normalized"  # or "combinatorial"
@@ -43,14 +52,12 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-    # ---------- Convenience ----------
-    @property
-    def mat_path(self) -> Path:
-        return Path(self.data_root) / self.mat_filename
-
     def ensure_dirs(self) -> None:
         for p in [self.data_root, self.raw_dir, self.processed_dir, self.backups_dir]:
             Path(p).mkdir(parents=True, exist_ok=True)
+
+    def __str__(self):
+        return f"Settings(data_root={self.data_root}, raw_dir={self.raw_dir}, processed_dir={self.processed_dir})"
 
 
 def load_settings() -> Settings:

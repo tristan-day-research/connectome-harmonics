@@ -2,4 +2,5 @@ dataset:
   name: camcan
   atlas: AAL-364
   n_nodes: 364
+  data_root: data/raw/raw_data_nhw2022-network-harmonics-data.mat
 

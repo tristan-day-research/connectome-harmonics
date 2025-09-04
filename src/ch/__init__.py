@@ -1,18 +1,26 @@
 """Convenient imports for the connectome-harmonics package (ch).
 
-Only this top-level __init__ is used for re-exports to keep subfolders simple.
+Automatically imports all submodules and their functions to simplify usage.
 """
 
-from . import settings as settings  # noqa: F401
+import pkgutil
+import importlib
+import sys
+from pathlib import Path
 
-# Analysis: inter-harmonics
-from .analysis.inter_harmonics_selectors import select_nodes as ih_select_nodes  # noqa: F401
-from .analysis.inter_harmonics_build import (  # noqa: F401
-    summarize_block as ih_summarize_block,
-    inter_harmonic_matrix as ih_matrix,
-)
-from .analysis.inter_harmonics_aggregate import (  # noqa: F401
-    per_subject as ih_per_subject,
-    group as ih_group,
-)
+# Automatically import all submodules
+package_name = __name__
+package_path = Path(__file__).parent
+
+for module_info in pkgutil.walk_packages([str(package_path)]):
+    module_name = f"{package_name}.{module_info.name}"
+    try:
+        module = importlib.import_module(module_name)
+        for attr_name in dir(module):
+            if not attr_name.startswith("_"):
+                setattr(sys.modules[package_name], attr_name, getattr(module, attr_name))
+    except ImportError as e:
+        # Skip modules that can't be imported due to missing dependencies
+        print(f"Warning: Could not import {module_name}: {e}")
+        continue
 
