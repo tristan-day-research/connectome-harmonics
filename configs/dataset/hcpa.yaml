@@ -1,0 +1,5 @@
+dataset:
+  name: hcpa
+  atlas: AAL-364   # change if HCP-A uses a different atlas later
+  n_nodes: 364
+

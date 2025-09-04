@@ -1,0 +1,5 @@
+dataset:
+  name: camcan
+  atlas: AAL-364
+  n_nodes: 364
+

@@ -1,0 +1,5 @@
+viz:
+  cmap: viridis
+  vmin: null
+  vmax: null
+

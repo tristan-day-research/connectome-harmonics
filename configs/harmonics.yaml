@@ -1,1 +1,4 @@
+harmonics:
+  n_modes: 128
+  laplacian: normalized     # or "combinatorial"
 

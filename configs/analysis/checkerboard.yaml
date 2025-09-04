@@ -1,1 +1,5 @@
+analysis:
+  name: checkerboard
+  threshold_mode: none     # "topk" | "zscore" | "none"
+  threshold_k: null
 

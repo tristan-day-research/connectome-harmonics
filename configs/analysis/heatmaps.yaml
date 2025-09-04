@@ -1,1 +1,6 @@
+analysis:
+  name: heatmaps
+  # parameters specific to this analysis
+  vmin: null
+  vmax: null
 

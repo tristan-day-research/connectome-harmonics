@@ -29,6 +29,8 @@ dependencies = [
   "networkx>=2.8",
   # Configs
   "PyYAML>=6.0",
+  # Settings
+  "pydantic>=1.10,<2",
   # Stats / ML helpers for analyses
   "scikit-learn>=1.2",
   "statsmodels>=0.13",
