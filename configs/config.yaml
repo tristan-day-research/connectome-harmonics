@@ -1,0 +1,16 @@
+defaults:
+  - dataset: camcan
+  - analysis: heatmaps
+  - harmonics: default
+  - viz: default
+  - _self_
+
+paths:
+  data_root: data
+  processed_dir: ${paths.data_root}/processed
+  metadata_dir: ${paths.data_root}/metadata
+  results_dir: results
+
+logging:
+  level: INFO
+

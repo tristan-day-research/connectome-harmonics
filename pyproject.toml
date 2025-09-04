@@ -25,10 +25,14 @@ dependencies = [
   "numpy>=1.23",
   "scipy>=1.9",
   "pandas>=1.5",
+  "xarray>=2023.1",
+  "pyarrow>=10.0",  # Required for parquet support
   # Graph / network utils (for connectome structures)
   "networkx>=2.8",
   # Configs
   "PyYAML>=6.0",
+  # Settings
+  "pydantic>=1.10,<2",
   # Stats / ML helpers for analyses
   "scikit-learn>=1.2",
   "statsmodels>=0.13",
@@ -44,7 +48,7 @@ io = [
   # Common neuroimaging / file formats (optional)
   "nibabel>=5.0",
   "h5py>=3.7",
-  "pyarrow>=10.0",
+  "zarr>=2.15",
 ]
 notebooks = [
   "jupyter>=1.0",

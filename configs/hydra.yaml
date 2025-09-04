@@ -1,0 +1,9 @@
+hydra:
+  job:
+    chdir: false      # do NOT change CWD
+  run:
+    dir: runs/${now:%Y-%m-%dT%H-%M-%S}_${analysis.name}
+  sweep:
+    dir: runs/multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${analysis.name}/${hydra.job.num}
+
