@@ -44,3 +44,5 @@ results/galleries/
 .DS_Store
 Thumbs.db
 
+.cursor/
+.cursorrules
