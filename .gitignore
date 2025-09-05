@@ -21,11 +21,14 @@ ENV/
 .idea/
 *.swp
 *.swo
+.cursor/
+.cursorrules
+cursor.md
 
 # Data (raw + processed)
 data/raw/
 data/processed/
-data/metadata/*.csv
+data/metadata/
 
 # Experiment artifacts
 runs/
@@ -46,6 +49,3 @@ Thumbs.db
 
 
 *.egg-info/
-.cursor/
-.cursorrules
-cursor.md
