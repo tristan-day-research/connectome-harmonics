@@ -29,7 +29,7 @@ Safety Features:
 
 Usage Examples:
     # Load existing metadata
-    metadata = load_metadata(settings)
+    metadata = load_metadata(settings, table='subjects')
     
     # Create new metadata (with safety check)
     instantiate_metadata(settings, new_dataframe)
@@ -61,76 +61,94 @@ import logging
 
 from ..settings import Settings
 
+
+def _get_table_path(settings: Settings, table: str) -> Path:
+    """Return parquet path for a given table ('subjects' or 'analyses')."""
+    if table == 'subjects':
+        return settings.subjects_parquet
+    if table == 'analyses':
+        return settings.analyses_parquet
+    raise ValueError("table must be 'subjects' or 'analyses'")
+
 logger = logging.getLogger(__name__)
 
 
-def load_metadata(settings: Settings) -> pd.DataFrame:
-    """Load metadata with validation.
-    
+def load_metadata(settings: Settings, table: str) -> pd.DataFrame:
+    """Load a metadata table.
+
     Args:
         settings: Project settings
-        
+        table: Which table to load: 'subjects' or 'analyses'
+
     Returns:
-        Validated metadata DataFrame
+        DataFrame for the requested table
     """
-    logger.info(f"Loading metadata from {settings.metadata_parquet}")
-    
-    if not settings.metadata_parquet.exists():
-        raise FileNotFoundError(f"Metadata file not found: {settings.metadata_parquet}")
-    
-    df = pd.read_parquet(settings.metadata_parquet)
-    # df = validate_metadata(df)
-    
-    logger.info(f"Loaded metadata for {len(df)} subjects")
-    
+    path = _get_table_path(settings, table)
+    rel = path.relative_to(settings.data_root) if path.is_absolute() else path
+    logger.info(f"Loading {table} metadata from {rel}")
+
+    if not path.exists():
+        raise FileNotFoundError(f"{table.capitalize()} metadata file not found: {path}")
+
+    df = pd.read_parquet(path)
+
+    if table == 'subjects':
+        logger.info(f"Loaded metadata for {len(df)} subjects")
+    else:
+        logger.info(f"Loaded analyses rows: {len(df)}")
+
     return df
 
 
-def instantiate_metadata(settings: Settings, metadata_df: pd.DataFrame) -> None:
+def instantiate_metadata(settings: Settings, metadata_df: pd.DataFrame, table: str) -> None:
     """Create new metadata file (replaces entire metadata).
     
     Args:
         settings: Project settings
         metadata_df: DataFrame to save as metadata
+        table: 'subjects' or 'analyses'
         
     Raises:
         FileExistsError: If metadata.parquet already exists
     """
-    logger.info(f"Instantiating new metadata with DataFrame shape: {metadata_df.shape}")
-    
-    # Check if metadata already exists
-    if settings.metadata_parquet.exists():
+    path = _get_table_path(settings, table)
+    logger.info(f"Instantiating new {table} metadata with DataFrame shape: {metadata_df.shape}")
+
+    # Check if parquet already exists
+    if path.exists():
         raise FileExistsError(
-            "WARNING: metadata.parquet already exists! To instantiate a new metadata.parquet you must delete the existing one."
+            f"{table.capitalize()} parquet already exists at {path}. Delete it to re-instantiate."
         )
-    
-    # Add creation timestamp
-    metadata_df = metadata_df.copy()
-    metadata_df['created_at'] = datetime.now()
-    metadata_df['updated_at'] = datetime.now()
-    
+
+    # Add creation/update timestamps
+    df = metadata_df.copy()
+    df['created_at'] = datetime.now()
+    df['updated_at'] = datetime.now()
+
     # Ensure the metadata directory exists
-    settings.metadata_parquet.parent.mkdir(parents=True, exist_ok=True)
-    
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     # Save new metadata
-    metadata_df.to_parquet(settings.metadata_parquet)
-    
-    logger.info(f"New metadata instantiated at {settings.metadata_parquet}")
-    logger.info(f"Columns: {list(metadata_df.columns)}")
+    df.to_parquet(path)
+
+    rel = path.relative_to(settings.data_root) if path.is_absolute() else path
+    logger.info(f"New {table} metadata instantiated at {rel}")
+    logger.info(f"Columns: {list(df.columns)}")
 
 
-def update_metadata(settings: Settings, new_data: pd.DataFrame, column_name: str) -> None:
+def update_metadata(settings: Settings, new_data: pd.DataFrame, column_name: str, table: str) -> None:
     """Add or update a column in existing metadata.
     
     Args:
         settings: Project settings
         new_data: DataFrame with subject_id and new column data
         column_name: Name of the column to add or update
+        table: 'subjects' or 'analyses'
     """
-    logger.info(f"Updating column '{column_name}' in metadata")
+    logger.info(f"Updating column '{column_name}' in {table} metadata")
     
     # Load existing metadata
-    existing_metadata = load_metadata(settings)
+    existing_metadata = load_metadata(settings, table=table)
     
     # Ensure new_data has subject_id as index
     if 'subject_id' in new_data.columns:
@@ -152,26 +170,29 @@ def update_metadata(settings: Settings, new_data: pd.DataFrame, column_name: str
     existing_metadata['updated_at'] = datetime.now()
     
     # Ensure the metadata directory exists
-    settings.metadata_parquet.parent.mkdir(parents=True, exist_ok=True)
-    
+    path = _get_table_path(settings, table)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     # Save updated metadata
-    existing_metadata.to_parquet(settings.metadata_parquet)
-    
-    logger.info(f"Successfully updated column '{column_name}' in metadata")
-    logger.info(f"Updated metadata saved to {settings.metadata_parquet}")
+    existing_metadata.to_parquet(path)
+
+    logger.info(f"Successfully updated column '{column_name}' in {table} metadata")
+    rel = path.relative_to(settings.data_root) if path.is_absolute() else path
+    logger.info(f"Updated metadata saved to {rel}")
 
 
-def delete_metadata_column(settings: Settings, column_name: str) -> None:
+def delete_metadata_column(settings: Settings, column_name: str, table: str) -> None:
     """Delete a column from existing metadata.
     
     Args:
         settings: Project settings
         column_name: Name of the column to delete
+        table: 'subjects' or 'analyses'
     """
-    logger.info(f"Deleting column '{column_name}' from metadata")
+    logger.info(f"Deleting column '{column_name}' from {table} metadata")
     
     # Load existing metadata
-    existing_metadata = load_metadata(settings)
+    existing_metadata = load_metadata(settings, table=table)
     
     # Check if column exists
     if column_name not in existing_metadata.columns:
@@ -179,7 +200,10 @@ def delete_metadata_column(settings: Settings, column_name: str) -> None:
         return
     
     # Don't allow deletion of critical columns
-    critical_columns = ['subject_id', 'age', 'dataset', 'created_at', 'updated_at']
+    if table == 'subjects':
+        critical_columns = ['subject_id', 'age', 'dataset', 'created_at', 'updated_at']
+    else:
+        critical_columns = ['subject_id', 'created_at', 'updated_at']
     if column_name in critical_columns:
         raise ValueError(f"Cannot delete critical column '{column_name}'. Critical columns: {critical_columns}")
     
@@ -190,32 +214,35 @@ def delete_metadata_column(settings: Settings, column_name: str) -> None:
     existing_metadata['updated_at'] = datetime.now()
     
     # Ensure the metadata directory exists
-    settings.metadata_parquet.parent.mkdir(parents=True, exist_ok=True)
-    
+    path = _get_table_path(settings, table)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     # Save updated metadata
-    existing_metadata.to_parquet(settings.metadata_parquet)
-    
-    logger.info(f"Successfully deleted column '{column_name}' from metadata")
-    logger.info(f"Updated metadata saved to {settings.metadata_parquet}")
+    existing_metadata.to_parquet(path)
+
+    logger.info(f"Successfully deleted column '{column_name}' from {table} metadata")
+    rel = path.relative_to(settings.data_root) if path.is_absolute() else path
+    logger.info(f"Updated metadata saved to {rel}")
 
 
-def backup_metadata(settings: Settings) -> Path:
+def backup_metadata(settings: Settings, table: str) -> Path:
     """Create a timestamped backup of the current metadata.
     
     Args:
         settings: Project settings
+        table: 'subjects' or 'analyses'
         
     Returns:
         Path to the backup file
     """
-    logger.info("Creating metadata backup")
+    logger.info(f"Creating {table} metadata backup")
     
     # Load current metadata
-    current_metadata = load_metadata(settings)
+    current_metadata = load_metadata(settings, table=table)
     
     # Create backup filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = settings.backups_dir / f"metadata_backup_{timestamp}.parquet"
+    backup_path = settings.backups_dir / f"{table}_metadata_backup_{timestamp}.parquet"
     
     # Ensure backup directory exists
     settings.backups_dir.mkdir(parents=True, exist_ok=True)
@@ -223,7 +250,7 @@ def backup_metadata(settings: Settings) -> Path:
     # Save backup
     current_metadata.to_parquet(backup_path)
     
-    logger.info(f"Metadata backup saved to {backup_path}")
+    logger.info(f"Metadata backup saved to {backup_path.relative_to(settings.data_root)}")
     return backup_path
 
 
@@ -237,7 +264,7 @@ def get_subject_info(settings: Settings, subject_id: int) -> pd.Series:
     Returns:
         Series with all subject information
     """
-    metadata = load_metadata(settings)
+    metadata = load_metadata(settings, table='subjects')
     
     if subject_id not in metadata.index:
         raise ValueError(f"Subject {subject_id} not found in metadata")
@@ -245,17 +272,18 @@ def get_subject_info(settings: Settings, subject_id: int) -> pd.Series:
     return metadata.loc[subject_id]
 
 
-def get_column_stats(settings: Settings, column_name: str) -> Dict[str, Any]:
+def get_column_stats(settings: Settings, column_name: str, table: str) -> Dict[str, Any]:
     """Get basic statistics for a specific column.
     
     Args:
         settings: Project settings
         column_name: Name of the column to analyze
+        table: 'subjects' or 'analyses'
         
     Returns:
         Dictionary with column statistics
     """
-    metadata = load_metadata(settings)
+    metadata = load_metadata(settings, table=table)
     
     if column_name not in metadata.columns:
         raise ValueError(f"Column '{column_name}' not found in metadata")
@@ -292,7 +320,7 @@ def extract_camcan_metadata(settings: Settings) -> pd.DataFrame:
     Returns:
         DataFrame with subject metadata
     """
-    logger.info(f"Extracting CamCAN metadata from {settings.camcan_raw}")
+    logger.info(f"Extracting CamCAN metadata from {settings.camcan_raw.relative_to(settings.data_root)}")
     
     # Load the raw data to get ages
     from .io import load_matlab_file
@@ -330,7 +358,7 @@ def extract_hcpa_metadata(raw_data_path: Path) -> pd.DataFrame:
     Returns:
         DataFrame with subject metadata
     """
-    logger.info(f"Extracting HCP-A metadata from {raw_data_path}")
+    logger.info(f"Extracting HCP-A metadata from {raw_data_path.name}")
     
     # TODO: Implement when HCP-A data is available
     # This is a placeholder structure
@@ -451,8 +479,6 @@ def get_subjects_for_analysis(settings: Settings, filters: Optional[Dict[str, An
     return metadata
 
 
-
-
 def create_metadata_summary(settings: pd.DataFrame) -> Dict[str, Any]:
     """Create a summary of metadata for reporting.
     
@@ -479,5 +505,3 @@ def create_metadata_summary(settings: pd.DataFrame) -> Dict[str, Any]:
     }
     
     return summary
-
-

@@ -34,7 +34,11 @@ class Settings(BaseSettings):
 
     # Object paths
     camcan_raw: Path = raw_dir / "raw_data_nhw2022-network-harmonics-data.mat"
-    metadata_parquet: Path = metadata_dir / "subject_metadata.parquet"
+    # Metadata tables
+    subjects_parquet: Path = metadata_dir / "subject_metadata.parquet"
+    analyses_parquet: Path = metadata_dir / "analyses_metadata.parquet"
+    # Backwards compatibility alias (older scripts reference this)
+    metadata_parquet: Path = metadata_dir / "subjects.parquet"
     connectivity_parquet: Path = processed_dir / "connectivity_matrices.parquet"
     harmonics_parquet: Path = processed_dir / "connectome_harmonics.parquet"
 
