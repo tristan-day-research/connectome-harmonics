@@ -38,9 +38,8 @@ def main():
     metadata.set_index('subject_id', inplace=True)
     
     # Save metadata
-    metadata_path = settings.metadata_parquet
-    metadata.to_parquet(metadata_path)
-    print(f"✅ Saved metadata: {metadata_path}")
+    metadata.to_parquet(settings.metadata_parquet)
+    print(f"✅ Saved metadata: {settings.metadata_parquet}")
     
     # Convert connectivity to long format for parquet
     print("Converting connectivity matrices to parquet...")
@@ -62,14 +61,13 @@ def main():
     
     # Save connectivity
     connectivity_df = pd.DataFrame(rows)
-    connectivity_path = settings.connectivity_parquet
-    connectivity_df.to_parquet(connectivity_path, index=False)
-    print(f"✅ Saved connectivity: {connectivity_path}")
-    print(f"   File size: {connectivity_path.stat().st_size / 1024**2:.1f} MB")
+    connectivity_df.to_parquet(settings.connectivity_parquet, index=False)
+    print(f"✅ Saved connectivity: {settings.connectivity_parquet}")
+    print(f"   File size: {settings.connectivity_parquet.stat().st_size / 1024**2:.1f} MB")
     
     print("\n✅ DONE! Your data is ready:")
-    print(f"   Metadata: {metadata_path}")
-    print(f"   Connectivity: {connectivity_path}")
+    print(f"   Metadata: {settings.metadata_parquet}")
+    print(f"   Connectivity: {settings.connectivity_parquet}")
 
 
 if __name__ == "__main__":

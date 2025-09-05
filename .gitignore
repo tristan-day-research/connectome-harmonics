@@ -48,4 +48,4 @@ Thumbs.db
 *.egg-info/
 .cursor/
 .cursorrules
-
+cursor.md

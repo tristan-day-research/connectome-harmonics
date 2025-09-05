@@ -13,9 +13,6 @@ except Exception as exc:  # pragma: no cover
 
 ENV_PREFIX = "CH_"
 
-
-# Resolve repository root regardless of current working directory
-# src/ch/settings.py -> src -> repo root
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -29,11 +26,11 @@ class Settings(BaseSettings):
     """
 
     # Paths (default relative to repository root, not CWD)
-    data_root: Path = Path("data")
+    data_root: Path = PROJECT_ROOT / "data"
     raw_dir: Path = data_root / "raw"
     processed_dir: Path = data_root / "processed"
     backups_dir: Path = data_root / "backups"
-    metadata_dir:Path = data_root / "metadata"
+    metadata_dir: Path = data_root / "metadata"
 
     # Object paths
     camcan_raw: Path = raw_dir / "raw_data_nhw2022-network-harmonics-data.mat"
@@ -47,6 +44,9 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
+
+    
+
     class Config:
         env_prefix = ENV_PREFIX
         env_file = ".env"
@@ -55,14 +55,41 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         for p in [self.data_root, self.raw_dir, self.processed_dir, self.backups_dir]:
             Path(p).mkdir(parents=True, exist_ok=True)
+    
+    def configure_logging(self) -> None:
+        """Configure logging for the application."""
+        import logging
+        
+        # Only configure if not already configured
+        if not logging.getLogger().handlers:
+            logging.basicConfig(
+                level=getattr(logging, self.log_level.upper()),
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%H:%M:%S',
+                force=True  # Override any existing configuration
+            )
 
     def __str__(self):
         return f"Settings(data_root={self.data_root}, raw_dir={self.raw_dir}, processed_dir={self.processed_dir})"
 
 
 def load_settings() -> Settings:
-    """Return Settings instance (env > defaults)."""
-    return Settings()
+    """Return Settings instance (env > defaults) with logging configured."""
+    settings = Settings()
+    settings.configure_logging()
+    return settings
+
+
+def ensure_logging() -> None:
+    """Ensure logging is configured. Useful for scripts that don't use load_settings()."""
+    import logging
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%H:%M:%S',
+            force=True
+        )
 
 
 # Example usage:
