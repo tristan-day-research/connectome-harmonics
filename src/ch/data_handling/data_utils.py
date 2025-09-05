@@ -6,29 +6,13 @@ from pathlib import Path
 from typing import Union, Optional
 
 
-def load_metadata(metadata_path: Union[str, Path]) -> pd.DataFrame:
-    """Load subject metadata from parquet file.
-    
-    Parameters
-    ----------
-    metadata_path : str or Path
-        Path to the metadata parquet file
-        
-    Returns
-    -------
-    pd.DataFrame
-        Subject metadata with subject_id as index
-    """
-    return pd.read_parquet(metadata_path)
-
-
-def load_connectivity(connectivity_path: Union[str, Path]) -> xr.DataArray:
+def load_connectivity(settings) -> xr.DataArray:
     """Load connectivity matrices from parquet file.
     
     Parameters
     ----------
-    connectivity_path : str or Path
-        Path to the connectivity parquet file
+    settings
+        Settings object containing connectivity_parquet path
         
     Returns
     -------
@@ -36,7 +20,7 @@ def load_connectivity(connectivity_path: Union[str, Path]) -> xr.DataArray:
         Connectivity matrices with dimensions (subject_id, region_i, region_j)
     """
     # Load the parquet file
-    df = pd.read_parquet(connectivity_path)
+    df = pd.read_parquet(settings.connectivity_parquet)
     
     # Convert to xarray DataArray
     # Assuming the parquet has columns: subject_id, region_i, region_j, connectivity_value
@@ -45,13 +29,13 @@ def load_connectivity(connectivity_path: Union[str, Path]) -> xr.DataArray:
     return da
 
 
-def load_connectivity_simple(connectivity_path: Union[str, Path]) -> np.ndarray:
+def load_connectivity_simple(settings) -> np.ndarray:
     """Load connectivity matrices as simple numpy array.
     
     Parameters
     ----------
-    connectivity_path : str or Path
-        Path to the connectivity parquet file
+    settings
+        Settings object containing connectivity_parquet path
         
     Returns
     -------
@@ -59,7 +43,7 @@ def load_connectivity_simple(connectivity_path: Union[str, Path]) -> np.ndarray:
         Connectivity matrices with shape (n_subjects, n_regions, n_regions)
     """
     # Load the parquet file
-    df = pd.read_parquet(connectivity_path)
+    df = pd.read_parquet(settings.connectivity_parquet)
     
     # Get dimensions
     n_subjects = df['subject_id'].nunique()
@@ -78,31 +62,31 @@ def load_connectivity_simple(connectivity_path: Union[str, Path]) -> np.ndarray:
     return connectivity
 
 
-def load_harmonics(harmonics_path: Union[str, Path]) -> xr.DataArray:
+def load_harmonics(settings) -> xr.DataArray:
     """Load connectome harmonics from parquet file.
     
     Parameters
     ----------
-    harmonics_path : str or Path
-        Path to the harmonics parquet file
+    settings
+        Settings object containing harmonics_parquet path
         
     Returns
     -------
     xr.DataArray
         Harmonics dataset
     """
-    df = pd.read_parquet(harmonics_path)
+    df = pd.read_parquet(settings.harmonics_parquet)
     da = df.set_index(['subject_id', 'harmonic', 'region'])['harmonic_value'].to_xarray()
     return da
 
 
-def load_yeo_labels(yeo_path: Union[str, Path]):
+def load_yeo_labels(settings):
     """Load yeo labels from pickle file.
     
     Parameters
     ----------
-    yeo_path : str or Path
-        Path to the yeo labels pickle file
+    settings
+        Settings object containing processed_dir path
         
     Returns
     -------
@@ -110,6 +94,7 @@ def load_yeo_labels(yeo_path: Union[str, Path]):
         Yeo labels data
     """
     import pickle
+    yeo_path = settings.processed_dir / "yeo_labels.pkl"
     with open(yeo_path, 'rb') as f:
         return pickle.load(f)
 

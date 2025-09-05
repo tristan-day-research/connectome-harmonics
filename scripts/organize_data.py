@@ -150,7 +150,7 @@ def create_harmonics_xarray_template(connectivity_ds: xr.Dataset,
     return ds
 
 
-def save_yeo_labels(data: Dict[str, Any], settings) -> None:
+def save_yeo_labels(data: Dict[str, Any], settings: Settings) -> None:
     """Save yeo labels separately as they have complex structure."""
     if 'yeoLabs' in data and data['yeoLabs'] is not None:
         yeo_path = settings.processed_dir / "yeo_labels.pkl"
@@ -160,7 +160,7 @@ def save_yeo_labels(data: Dict[str, Any], settings) -> None:
             pickle.dump(data['yeoLabs'], f)
 
 
-def save_data_organized(settings, metadata: pd.DataFrame, 
+def save_data_organized(settings: Settings, metadata: pd.DataFrame, 
                        connectivity_ds: xr.Dataset, 
                        harmonics_ds: xr.Dataset,
                        raw_data: Dict[str, Any]) -> None:
@@ -173,9 +173,8 @@ def save_data_organized(settings, metadata: pd.DataFrame,
     metadata_dir.mkdir(exist_ok=True)
     
     # Save metadata as parquet
-    metadata_path = metadata_dir / "subject_metadata.parquet"
-    print(f"Saving metadata to {metadata_path}")
-    metadata.to_parquet(metadata_path)
+    print(f"Saving metadata to {settings.metadata_parquet}")
+    metadata.to_parquet(settings.metadata_parquet)
     
     # Backup metadata
     backup_dataframe(metadata, backup_dir=settings.backups_dir)
@@ -194,7 +193,7 @@ def save_data_organized(settings, metadata: pd.DataFrame,
     save_yeo_labels(raw_data, settings)
     
     print("Data organization complete!")
-    print(f"Metadata: {metadata_path}")
+    print(f"Metadata: {settings.metadata_parquet}")
     print(f"Connectivity: {connectivity_path}")
     print(f"Harmonics: {harmonics_path}")
     print(f"Yeo labels: {settings.processed_dir / 'yeo_labels.pkl'}")
