@@ -479,7 +479,7 @@ def get_subjects_for_analysis(settings: Settings, filters: Optional[Dict[str, An
     return metadata
 
 
-def create_metadata_summary(settings: pd.DataFrame) -> Dict[str, Any]:
+def create_metadata_summary(settings: pd.DataFrame, table: None) -> Dict[str, Any]:
     """Create a summary of metadata for reporting.
     
     Args:
@@ -489,7 +489,7 @@ def create_metadata_summary(settings: pd.DataFrame) -> Dict[str, Any]:
         Dictionary with summary statistics
     """
 
-    metadata = load_metadata(settings)
+    metadata = load_metadata(settings, table=table)
 
     summary = {
         'total_subjects': len(metadata),
