@@ -37,10 +37,12 @@ class Settings(BaseSettings):
     # Metadata tables
     subjects_parquet: Path = metadata_dir / "subject_metadata.parquet"
     analyses_parquet: Path = metadata_dir / "analyses_metadata.parquet"
+    
     # Backwards compatibility alias (older scripts reference this)
     metadata_parquet: Path = metadata_dir / "subjects.parquet"
-    connectivity_parquet: Path = processed_dir / "connectivity_matrices.parquet"
-    harmonics_parquet: Path = processed_dir / "connectome_harmonics.parquet"
+
+    # Xarray/Zarr stores
+    harmonics_dir: Path = processed_dir / "harmonics"
 
     # Algorithm defaults
     lap_type: str = "normalized"  # or "combinatorial"
@@ -57,8 +59,27 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
     def ensure_dirs(self) -> None:
-        for p in [self.data_root, self.raw_dir, self.processed_dir, self.backups_dir]:
+        for p in [self.data_root, self.raw_dir, self.processed_dir, self.backups_dir, self.metadata_dir, self.harmonics_dir]:
             Path(p).mkdir(parents=True, exist_ok=True)
+
+    def harmonics_store_path(self, atlas: str | None = None) -> Path:
+        """Return path to the Zarr store for an atlas' harmonics dataset.
+
+        If atlas is None, uses a generic name. Atlas name is slugified to keep
+        filesystem-friendly paths.
+        """
+        def _slug(s: str) -> str:
+            return (
+                str(s)
+                .strip()
+                .lower()
+                .replace(" ", "-")
+                .replace("/", "-")
+                .replace("_", "-")
+            )
+
+        name = f"harmonics_{_slug(atlas)}.zarr" if atlas else "harmonics.zarr"
+        return self.harmonics_dir / name
     
     def configure_logging(self) -> None:
         """Configure logging for the application."""
