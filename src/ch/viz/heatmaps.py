@@ -1,65 +1,77 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union
+from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+import xarray as xr
 
 from ..settings import Settings
-from ..data_handling.data_utils import open_connectivity_dataset
 
 
 def plot_heatmap(
     settings: Settings,
     *,
-    dataset: str = "connectivity",  # "connectivity" or "harmonics"
-    var: str = "connectivity",      # e.g., "connectivity", "eigvecs", "eigvals"
-    atlas: Optional[str] = "AAL-376",
-    sel: Optional[dict] = None,
+    path: Union[str, Path],
+    subject_id: int,
+    n_harmonics: Optional[int] = None,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     cmap: str = "viridis",
-    colorbar: bool = True,
-    ax: Optional[plt.Axes] = None,
-    title: Optional[str] = None,
-) -> plt.Axes:
-    """Plot a heatmap for any 2D slice from a stored xarray dataset.
+    figsize: tuple = (8, 6),
+) -> plt.Figure:
+    """Plot a simple heatmap from a connectivity or harmonics file.
 
-    - dataset: select which store to open ("connectivity" or "harmonics").
-    - var: name of the variable in that dataset to plot.
-    - sel: dict of xarray .sel() arguments to reduce to a 2D matrix.
+    - If the file has `connectivity(subject_id, node, node_2)`, plot that 376×376 matrix.
+    - If the file has `eigvecs(subject_id, node, mode)`, plot a 376×k heatmap formed by
+      stacking the first k eigenvectors as columns (k = n_harmonics or all if None).
+    - Title includes subject_id, age (if present as a coord), and atlas (dataset) from attrs.
     """
-    if dataset == "connectivity":
-        ds = open_connectivity_dataset(settings, atlas=atlas)
-    elif dataset == "harmonics":
-        from ..compute_harmonics.harmonics import open_harmonics_dataset  # lazy import
-        ds = open_harmonics_dataset(settings, atlas=atlas)
-    else:
-        raise ValueError("dataset must be 'connectivity' or 'harmonics'")
+    ds = xr.open_dataset(str(path), engine="scipy")
+    atlas = ds.attrs.get("atlas", "unknown")
 
-    # Friendly error if variable not present
-    if var not in ds.data_vars:
-        available = ", ".join(ds.data_vars)
-        raise KeyError(f"Variable '{var}' not found in {dataset} dataset. Available: {available}")
-    da = ds[var]
-    if sel:
-        da = da.sel(**sel)
-    A = da.values
-    if A.ndim != 2:
-        raise ValueError(f"Selected data is not 2D; got shape {A.shape}. Provide 'sel' to pick a 2D slice.")
+    # Determine subject coord name
+    subj_dim = "subject_id" if "subject_id" in ds.dims else ("subject" if "subject" in ds.dims else None)
+    if subj_dim is None:
+        raise ValueError("Dataset must have a 'subject_id' or 'subject' dimension")
+    if subject_id not in ds[subj_dim].values:
+        raise ValueError(f"subject_id {subject_id} not found in dataset")
 
-    if ax is None:
-        _, ax = plt.subplots(figsize=(6, 5))
+    # Age if present
+    age_str = ""
+    if "age" in ds.coords and subj_dim in ds["age"].dims:
+        try:
+            age_val = float(ds["age"].sel({subj_dim: subject_id}).values)
+            age_str = f" • age={age_val:.0f}"
+        except Exception:
+            age_str = ""
 
-    im = ax.imshow(A, vmin=vmin, vmax=vmax, cmap=cmap, origin="upper")
-    ax.set_xlabel(da.dims[-1])
-    ax.set_ylabel(da.dims[-2])
-    if title is None:
-        title = f"{dataset}:{var} {sel or ''}"
-    ax.set_title(title)
-    if colorbar:
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if "connectivity" in ds.data_vars:
+        A = ds["connectivity"].sel({subj_dim: subject_id}).values
+        if A.ndim != 2:
+            raise ValueError(f"Connectivity selection not 2D; got {A.shape}")
+        im = ax.imshow(A, vmin=vmin, vmax=vmax, cmap=cmap, origin="upper")
+        ax.set_xlabel("node_2"); ax.set_ylabel("node")
+        ax.set_title(f"connectivity 376×376 • subject_id={subject_id}{age_str} • atlas={atlas}")
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    return ax
+        return fig
 
+    if "eigvecs" in ds.data_vars:
+        V = ds["eigvecs"].sel({subj_dim: subject_id}).values  # expect (node, mode)
+        V = np.squeeze(V)
+        if V.ndim != 2:
+            raise ValueError(f"eigvecs expected 2D after selecting subject; got {V.shape}")
+        n_nodes, n_modes = V.shape
+        k = n_modes if (n_harmonics is None or n_harmonics > n_modes) else int(n_harmonics)
+        V2 = V[:, :k]
+        im = ax.imshow(V2, aspect="auto", vmin=vmin, vmax=vmax, cmap=cmap, origin="upper")
+        ax.set_xlabel("mode"); ax.set_ylabel("node")
+        ax.set_title(f"eigvecs {n_nodes}×{k} • subject_id={subject_id}{age_str} • atlas={atlas}")
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        return fig
 
-# No wrapper needed; use plot_heatmap directly for all matrices.
+    available = ", ".join(ds.data_vars)
+    raise KeyError(f"Dataset has neither 'connectivity' nor 'eigvecs'. Available: {available}")

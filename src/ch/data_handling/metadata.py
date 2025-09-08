@@ -62,6 +62,37 @@ import logging
 from ..settings import Settings
 
 
+def create_metadata_summary(settings: pd.DataFrame, table: None) -> Dict[str, Any]:
+    """Create a summary of metadata for reporting.
+    
+    Args:
+        metadata: Metadata DataFrame
+        
+    Returns:
+        Dictionary with summary statistics
+    """
+
+    metadata = load_metadata(settings, table=table)
+
+    summary = {
+        'total_subjects': len(metadata),
+        'datasets': metadata['dataset'].value_counts().to_dict() if 'dataset' in metadata.columns else {},
+        'age_stats': {
+            'min': float(metadata['age'].min()),
+            'max': float(metadata['age'].max()),
+            'mean': float(metadata['age'].mean()),
+            'std': float(metadata['age'].std()),
+        } if 'age' in metadata.columns else {},
+        'scan_types': metadata['scan_type'].value_counts().to_dict() if 'scan_type' in metadata.columns else {},
+        'atlas_versions': metadata['atlas'].value_counts().to_dict() if 'atlas' in metadata.columns else {},
+    }
+    
+    return summary
+
+
+    
+    
+
 def _get_table_path(settings: Settings, table: str) -> Path:
     """Return parquet path for a given table ('subjects' or 'analyses')."""
     if table == 'subjects':
@@ -478,30 +509,3 @@ def get_subjects_for_analysis(settings: Settings, filters: Optional[Dict[str, An
     
     return metadata
 
-
-def create_metadata_summary(settings: pd.DataFrame, table: None) -> Dict[str, Any]:
-    """Create a summary of metadata for reporting.
-    
-    Args:
-        metadata: Metadata DataFrame
-        
-    Returns:
-        Dictionary with summary statistics
-    """
-
-    metadata = load_metadata(settings, table=table)
-
-    summary = {
-        'total_subjects': len(metadata),
-        'datasets': metadata['dataset'].value_counts().to_dict() if 'dataset' in metadata.columns else {},
-        'age_stats': {
-            'min': float(metadata['age'].min()),
-            'max': float(metadata['age'].max()),
-            'mean': float(metadata['age'].mean()),
-            'std': float(metadata['age'].std()),
-        } if 'age' in metadata.columns else {},
-        'scan_types': metadata['scan_type'].value_counts().to_dict() if 'scan_type' in metadata.columns else {},
-        'atlas_versions': metadata['atlas'].value_counts().to_dict() if 'atlas' in metadata.columns else {},
-    }
-    
-    return summary
