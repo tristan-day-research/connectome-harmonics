@@ -1,7 +1,45 @@
 from __future__ import annotations
 
+"""Compute connectome harmonics (graph Laplacian eigenpairs) from connectivity.
+
+Pure compute utilities with minimal, explicit options and no implicit IO.
+
+Key options exposed:
+- lap_type: 'normalized' or 'combinatorial'
+- k: number of smallest eigenpairs (None = full)
+- adjacency prep: symmetrize, zero_diagonal, clip_negative, binarize_threshold
+
+High-level API:
+- compute_harmonics_dataset(conn_ds, ...): build an xarray Dataset with
+  dims (subject_id, node, mode) and variables eigvecs/eigvals (+ optional adjacency)
+  from an input xarray connectivity dataset with var 'connectivity'.
+
+
+Here’s a concise breakdown of the options and what’s typical for computing of connectome harmonics
+
+Harmonics Options
+
+Laplacian:
+normalized: symmetric normalized L = I − D^(-1/2) A D^(-1/2); most common for connectome harmonics because eigenvectors form an orthonormal basis w.r.t. the standard inner product and are less degree-biased.
+combinatorial: L = D − A; classic definition, sometimes used when you want direct degree weighting.
+random_walk: L = I − D^(-1) A; useful for diffusion processes; eigenvectors orthogonal in a D-weighted sense. Less common for harmonics plots but relevant for dynamics.
+Spectrum size:
+k: number of smallest eigenpairs; set k=None for the full basis. Typical: full for N=376 is fine; for very large N, pick k for “low-frequency” modes.
+Adjacency preprocessing:
+symmetrize: average with transpose; usually True for DTI connectomes.
+zero_diagonal: remove self-loops; True.
+clip_negative: clamp tiny negative values; True to guard numerical artifacts.
+binarize_threshold: optional, converts to unweighted graph at given threshold; typically unused for DTI unless you specifically want binary adjacency.
+Storage:
+include_adjacency: include or omit the adjacency per subject in the harmonics dataset; typically False (store eigvals/eigvecs only) to keep file small.
+Typical default for this project
+
+lap_type='normalized', k=None, symmetrize=True, zero_diagonal=True, clip_negative=True, binarize_threshold=None, include_adjacency=False.
+
+"""
+
 import logging
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Optional, Tuple, Mapping, Iterable
 
 import numpy as np
 import xarray as xr
@@ -9,32 +47,57 @@ from scipy.linalg import eigh
 from scipy.sparse import csr_matrix, issparse
 from scipy.sparse.csgraph import laplacian
 from scipy.sparse.linalg import eigsh
-import pygsp
-
-from ..data_handling.metadata import load_metadata
-from ..data_handling.io import get_nets_and_ages
 
 logger = logging.getLogger(__name__)
 
 
-def _prepare_adjacency(A: np.ndarray) -> np.ndarray:
-    """Symmetrize, zero the diagonal, ensure float64, and clip negatives."""
+def _prepare_adjacency(
+    A: np.ndarray,
+    *,
+    symmetrize: bool = True,
+    zero_diagonal: bool = True,
+    clip_negative: bool = True,
+    binarize_threshold: float | None = None,
+) -> np.ndarray:
+    """Return a clean adjacency matrix for Laplacian computation.
+
+    - symmetrize: make A = (A + A.T)/2
+    - zero_diagonal: remove self-loops
+    - clip_negative: clamp negatives to 0 (handles tiny rounding noise)
+    - binarize_threshold: if provided, set A = 1*(A>=threshold) after cleanup
+    """
     A = np.asarray(A, dtype=np.float64)
     if A.ndim != 2 or A.shape[0] != A.shape[1]:
         raise ValueError("adjacency matrix must be square 2D array")
-    # Symmetrize
-    A = 0.5 * (A + A.T)
-    # Remove self loops
-    np.fill_diagonal(A, 0.0)
-    # Clip tiny negative weights (e.g., due to rounding)
-    A[A < 0] = 0.0
+    if symmetrize:
+        A = 0.5 * (A + A.T)
+    if zero_diagonal:
+        np.fill_diagonal(A, 0.0)
+    if clip_negative:
+        A[A < 0] = 0.0
+    if binarize_threshold is not None:
+        A = (A >= float(binarize_threshold)).astype(np.float64)
     return A
 
 
 def _laplacian(A: np.ndarray, lap_type: str = "normalized") -> np.ndarray:
+    """Return graph Laplacian matrix for adjacency A.
+
+    lap_type:
+      - 'combinatorial': L = D - A
+      - 'normalized'  : L = I - D^{-1/2} A D^{-1/2} (symmetric normalized)
+      - 'random_walk' : L = I - D^{-1} A
+    """
+    if lap_type == "random_walk":
+        d = np.asarray(A.sum(axis=1)).ravel()
+        with np.errstate(divide="ignore"):
+            dinv = np.where(d > 0, 1.0 / d, 0.0)
+        DinvA = (A * dinv[:, None])
+        n = A.shape[0]
+        return np.eye(n, dtype=np.float64) - DinvA
     normed = (lap_type == "normalized")
     if lap_type not in {"normalized", "combinatorial"}:
-        raise ValueError("lap_type must be 'normalized' or 'combinatorial'")
+        raise ValueError("lap_type must be 'normalized', 'combinatorial', or 'random_walk'")
     return laplacian(A, normed=normed)
 
 
@@ -60,27 +123,44 @@ def _eigendecompose_laplacian(L: np.ndarray, k: int | None = None):
 
 
 def compute_graph_laplacian_eigen(
-    data_dict: Dict[int, np.ndarray],
+    data_dict: Mapping[int, np.ndarray],
+    *,
     lap_type: str = "normalized",
     k: int | None = None,
-):
-    """Compute Laplacian eigenpairs for each subject in a dict of adjacencies.
+    symmetrize: bool = True,
+    zero_diagonal: bool = True,
+    clip_negative: bool = True,
+    binarize_threshold: float | None = None,
+) -> Dict[int, Dict[str, np.ndarray]]:
+    """Compute Laplacian eigenpairs for each subject in a mapping of adjacencies.
 
-    Returns a dict for convenience; prefer xarray functions below for persistent storage.
+    Returns a dict keyed by subject_id with 'eigenvectors' and 'eigenvalues'.
     """
-    result_dict: Dict[int, Dict[str, np.ndarray]] = {}
-    for subject, matrix in data_dict.items():
-        A = _prepare_adjacency(matrix)
+    result: Dict[int, Dict[str, np.ndarray]] = {}
+    for sid, matrix in data_dict.items():
+        A = _prepare_adjacency(
+            matrix,
+            symmetrize=symmetrize,
+            zero_diagonal=zero_diagonal,
+            clip_negative=clip_negative,
+            binarize_threshold=binarize_threshold,
+        )
         L = _laplacian(A, lap_type=lap_type)
-        eigenvalues, eigenvectors = _eigendecompose_laplacian(L, k=k)
-        result_dict[subject] = {
-            'eigenvectors': eigenvectors,
-            'eigenvalues': eigenvalues,
-        }
-    return result_dict
+        e, U = _eigendecompose_laplacian(L, k=k)
+        result[sid] = {"eigenvectors": U, "eigenvalues": e}
+    return result
 
 
-def compute_connectome_harmonics(adjacency_dict, lap_type: str = "normalized", k: int | None = None):
+def compute_connectome_harmonics(
+    adjacency_dict: Mapping[int, np.ndarray],
+    *,
+    lap_type: str = "normalized",
+    k: int | None = None,
+    symmetrize: bool = True,
+    zero_diagonal: bool = True,
+    clip_negative: bool = True,
+    binarize_threshold: float | None = None,
+):
     """
     Returns a dictionary where each key is a subject number and each value is another dictionary with 
     keys 'eigenvectors' and 'eigenvalues' corresponding to the eigenvectors and eigenvalues of the graph Laplacian
@@ -91,31 +171,15 @@ def compute_connectome_harmonics(adjacency_dict, lap_type: str = "normalized", k
     - lap_type: either "combinatorial" or "normalized"
     """
     
-    result_dict = {}
-
-    for subject, adjacency_matrix in adjacency_dict.items():
-        # Prepare adjacency (symmetrize, zero diag, clip negatives)
-        A = _prepare_adjacency(adjacency_matrix)
-
-        # Use PyGSP for Laplacian + basis if full basis is requested
-        if k is None:
-            G_fd = pygsp.graphs.Graph(A)
-            G_fd.compute_laplacian(lap_type=lap_type)
-            G_fd.compute_fourier_basis()
-            result_dict[subject] = {
-                'eigenvectors': G_fd.U,
-                'eigenvalues': G_fd.e,
-            }
-        else:
-            # For partial spectra, use SciPy path for efficiency
-            L = _laplacian(A, lap_type=lap_type)
-            e, U = _eigendecompose_laplacian(L, k=k)
-            result_dict[subject] = {
-                'eigenvectors': U,
-                'eigenvalues': e,
-            }
-
-    return result_dict
+    return compute_graph_laplacian_eigen(
+        adjacency_dict,
+        lap_type=lap_type,
+        k=k,
+        symmetrize=symmetrize,
+        zero_diagonal=zero_diagonal,
+        clip_negative=clip_negative,
+        binarize_threshold=binarize_threshold,
+    )
 
 # Usage:
 # Assuming adjacency_dict is your dictionary of adjacency matrices
@@ -123,20 +187,24 @@ def compute_connectome_harmonics(adjacency_dict, lap_type: str = "normalized", k
 
 # This function is for a numpy array rather than a dict
 
-def compute_laplacian_eigendecomposition(adjacency_matrix, lap_type: str = "normalized", k: int | None = None):
-    """
-    Compute eigenvalues and eigenvectors of the graph Laplacian of a single adjacency matrix.
-    
-    Parameters:
-    - adjacency_matrix: 2D NumPy array (square)
-    - lap_type: 'normalized' or 'combinatorial'
-    - k: number of smallest eigenpairs to return (None = full)
-    
-    Returns:
-    - eigenvalues: 1D NumPy array
-    - eigenvectors: 2D NumPy array (columns are eigenvectors)
-    """
-    A = _prepare_adjacency(adjacency_matrix)
+def compute_laplacian_eigendecomposition(
+    adjacency_matrix: np.ndarray,
+    *,
+    lap_type: str = "normalized",
+    k: int | None = None,
+    symmetrize: bool = True,
+    zero_diagonal: bool = True,
+    clip_negative: bool = True,
+    binarize_threshold: float | None = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Eigenvalues and eigenvectors of the graph Laplacian of a single adjacency."""
+    A = _prepare_adjacency(
+        adjacency_matrix,
+        symmetrize=symmetrize,
+        zero_diagonal=zero_diagonal,
+        clip_negative=clip_negative,
+        binarize_threshold=binarize_threshold,
+    )
     L = _laplacian(A, lap_type=lap_type)
     eigenvalues, eigenvectors = _eigendecompose_laplacian(L, k=k)
     return eigenvalues, eigenvectors
@@ -149,7 +217,9 @@ def _subject_dataset(
     A: np.ndarray,
     eigvecs: np.ndarray,
     eigvals: np.ndarray,
+    *,
     atlas: Optional[str] = None,
+    age: Optional[float] = None,
 ) -> xr.Dataset:
     """Build an xarray Dataset for a single subject with dims:
     - subject: [subject_id]
@@ -162,160 +232,127 @@ def _subject_dataset(
 
     ds = xr.Dataset(
         data_vars=dict(
-            adjacency=("subject", "node", "node_2", A[np.newaxis, :, :]),
-            eigvecs=("subject", "node", "mode", eigvecs[np.newaxis, :, :]),
-            eigvals=("subject", "mode", eigvals[np.newaxis, :]),
+            adjacency=(("subject_id", "node", "node_2"), A[np.newaxis, :, :]),
+            eigvecs=(("subject_id", "node", "mode"), eigvecs[np.newaxis, :, :]),
+            eigvals=(("subject_id", "mode"), eigvals[np.newaxis, :]),
         ),
         coords=dict(
-            subject=("subject", np.atleast_1d(subject_id)),
+            subject_id=("subject_id", np.atleast_1d(subject_id)),
             node=("node", np.arange(n_nodes, dtype=np.int32)),
             node_2=("node_2", np.arange(n_nodes, dtype=np.int32)),
             mode=("mode", np.arange(n_modes, dtype=np.int32)),
         ),
         attrs={
             "atlas": atlas or "unknown",
-            "layout": "subject,node,mode",
+            "layout": "subject_id,node,mode",
         },
     )
+    if age is not None:
+        ds = ds.assign_coords(age=("subject_id", np.atleast_1d(float(age))))
     return ds
 
 
 def compute_subject_harmonics(
-    settings: Settings,
     subject_id: int,
-    adjacency_matrix: Optional[np.ndarray] = None,
+    adjacency_matrix: np.ndarray,
     *,
     atlas: Optional[str] = None,
-    lap_type: Optional[str] = None,
+    lap_type: str = "normalized",
     k: Optional[int] = None,
     include_adjacency: bool = True,
+    symmetrize: bool = True,
+    zero_diagonal: bool = True,
+    clip_negative: bool = True,
+    binarize_threshold: float | None = None,
+    age: Optional[float] = None,
 ) -> xr.Dataset:
-    """Compute harmonics for a single subject and return an xarray Dataset.
+    """Compute harmonics for a single subject and return an xarray Dataset row.
 
-    - Pass `adjacency_matrix` if you already have it; otherwise this will try to load
-      it from the CamCAN raw `.mat` (subject_id as 1-indexed).
-    - `lap_type` defaults to `settings.lap_type`.
-    - If `k` is provided, computes only the k smallest eigenpairs.
-    - `include_adjacency=False` will skip writing adjacency to reduce disk.
+    No implicit IO. Pass the adjacency matrix explicitly. Optional age becomes a
+    coordinate along 'subject_id'.
     """
-    lap = lap_type or settings.lap_type
-
-    if adjacency_matrix is None:
-        # Fallback loader for CamCAN: nets[:,:,i] with 1-indexed subject_id
-        if not settings.camcan_raw.exists():
-            raise FileNotFoundError(
-                "Adjacency not provided and camcan_raw not found. Supply adjacency_matrix."
-            )
-        nets, _ages = get_nets_and_ages(settings.camcan_raw)
-        idx = int(subject_id) - 1
-        if idx < 0 or idx >= nets.shape[-1]:
-            raise IndexError(f"subject_id {subject_id} out of range for CamCAN nets")
-        A = np.array(nets[:, :, idx], dtype=np.float64)
-        if atlas is None:
-            atlas = "AAL-376" if A.shape[0] == 376 else f"n{A.shape[0]}"
-    else:
-        A = np.asarray(adjacency_matrix, dtype=np.float64)
-        if atlas is None:
-            atlas = f"n{A.shape[0]}"
-
-    A = _prepare_adjacency(A)
-    L = _laplacian(A, lap_type=lap)
+    A = _prepare_adjacency(
+        adjacency_matrix,
+        symmetrize=symmetrize,
+        zero_diagonal=zero_diagonal,
+        clip_negative=clip_negative,
+        binarize_threshold=binarize_threshold,
+    )
+    if atlas is None:
+        atlas = "AAL-376" if A.shape[0] == 376 else f"n{A.shape[0]}"
+    L = _laplacian(A, lap_type=lap_type)
     e, U = _eigendecompose_laplacian(L, k=k)
 
-    # Optionally drop adjacency to save space
-    A_to_store = A if include_adjacency else np.empty((A.shape[0], A.shape[1]), dtype=np.float64)
-    if not include_adjacency:
-        A_to_store[:] = np.nan
-
-    return _subject_dataset(subject_id=subject_id, A=A_to_store, eigvecs=U, eigvals=e, atlas=atlas)
+    # Optionally drop adjacency to reduce size
+    A_to_store = A if include_adjacency else np.full_like(A, np.nan, dtype=np.float64)
+    return _subject_dataset(subject_id=subject_id, A=A_to_store, eigvecs=U, eigvals=e, atlas=atlas, age=age)
 
 
-def save_subject_to_zarr(
-    ds_subject: xr.Dataset,
-    store_path: str | "Path",
+def compute_harmonics_dataset(
+    conn_ds: xr.Dataset,
     *,
-    append: bool = True,
-) -> None:
-    """Append a single-subject Dataset (with subject dim length 1) to a Zarr store.
-    Creates the store if missing; otherwise appends along the 'subject' dimension.
-    """
-    path = str(store_path)
-
-    # Choose simple chunking that enables appends
-    n_nodes = ds_subject.dims["node"]
-    n_modes = ds_subject.dims["mode"]
-    encoding = {
-        "adjacency": {"chunks": (1, n_nodes, n_nodes)},
-        "eigvecs": {"chunks": (1, n_nodes, min(128, n_modes))},
-        "eigvals": {"chunks": (1, min(128, n_modes))},
-    }
-
-    mode = "a" if append else "w"
-    ds_subject.to_zarr(path, mode=mode, append_dim="subject", encoding=encoding)
-
-
-def compute_and_store_harmonics_for_all_subjects(
-    settings: Settings,
-    *,
-    atlas: Optional[str] = None,
-    lap_type: Optional[str] = None,
+    lap_type: str = "normalized",
     k: Optional[int] = None,
-    include_adjacency: bool = True,
-    overwrite: bool = False,
-    limit: Optional[int] = None,
-) -> str:
-    """Compute harmonics for all subjects listed in subjects metadata and store in Zarr.
+    include_adjacency: bool = False,
+    ages: Optional[Mapping[int, float]] = None,
+    symmetrize: bool = True,
+    zero_diagonal: bool = True,
+    clip_negative: bool = True,
+    binarize_threshold: float | None = None,
+) -> xr.Dataset:
+    """Compute harmonics for all subjects in a connectivity xarray Dataset.
 
-    Strategy:
-    - Loads subjects from `settings.subjects_parquet` (index is `subject_id`).
-    - For each subject, computes harmonics via `compute_subject_harmonics`.
-    - Writes to a per-atlas Zarr dataset at `settings.harmonics_dir / harmonics_<atlas>.zarr`.
-    - Appends along the `subject` dimension; use `overwrite=True` to start fresh.
-
-    Returns the Zarr store path as a string.
+    Expects a variable 'connectivity' with dims (subject_id|subject, node, node_2).
+    Returns a Dataset with dims (subject_id, node, mode) and variables eigvecs/eigvals
+    (and optionally adjacency). If ages are provided (mapping subject_id→age),
+    they are attached as a coordinate along 'subject_id'.
     """
-    # Load metadata and figure subject list
-    meta = load_metadata(settings, table="subjects")
-    if "subject_id" in meta.columns:
-        meta = meta.set_index("subject_id")
-    subject_ids = list(meta.index.astype(int))
-    if limit is not None:
-        subject_ids = subject_ids[: int(limit)]
+    if "connectivity" not in conn_ds.data_vars:
+        raise KeyError("Expected variable 'connectivity' in the input Dataset")
 
-    # Determine atlas name
-    atlas_name = atlas or (meta["atlas"].iloc[0] if "atlas" in meta.columns and len(meta) > 0 else None)
-    store = settings.harmonics_store_path(atlas=atlas_name)
-    store.parent.mkdir(parents=True, exist_ok=True)
+    # Normalize primary key dim to 'subject_id'
+    if "subject_id" in conn_ds.dims:
+        ds = conn_ds
+    elif "subject" in conn_ds.dims:
+        ds = conn_ds.rename({"subject": "subject_id"})
+    else:
+        raise KeyError("Connectivity dataset must have a 'subject' or 'subject_id' dimension")
 
-    # Fresh start if requested
-    if overwrite and store.exists():
-        import shutil
-        shutil.rmtree(store, ignore_errors=True)
+    atlas = ds.attrs.get("atlas", "unknown")
+    subject_ids: Iterable[int] = [int(s) for s in ds["subject_id"].values]
 
-    # Iterate and append
-    for i, sid in enumerate(subject_ids, start=1):
-        ds_sub = compute_subject_harmonics(
-            settings,
+    rows: list[xr.Dataset] = []
+    for sid in subject_ids:
+        A = np.asarray(ds["connectivity"].sel(subject_id=sid).values, dtype=np.float64)
+        age = None
+        if ages is not None:
+            try:
+                age = float(ages[int(sid)])
+            except Exception:
+                age = None
+        row = compute_subject_harmonics(
             subject_id=sid,
-            adjacency_matrix=None,
-            atlas=atlas_name,
+            adjacency_matrix=A,
+            atlas=atlas,
             lap_type=lap_type,
             k=k,
             include_adjacency=include_adjacency,
+            symmetrize=symmetrize,
+            zero_diagonal=zero_diagonal,
+            clip_negative=clip_negative,
+            binarize_threshold=binarize_threshold,
+            age=age,
         )
-        save_subject_to_zarr(ds_sub, store, append=True)
+        rows.append(row)
 
-        if i % 10 == 0 or i == len(subject_ids):
-            logger.info(f"Computed harmonics for {i}/{len(subject_ids)} subjects")
-
-    rel = store.relative_to(settings.data_root) if store.is_absolute() else store
-    logger.info(f"Harmonics Zarr saved/appended at {rel}")
-    return str(store)
+    ds_h = xr.concat(rows, dim="subject_id")
+    return ds_h
 
 
-def open_harmonics_dataset(settings: Settings, atlas: Optional[str] = None) -> xr.Dataset:
-    """Open the harmonics Zarr dataset for an atlas as an xarray Dataset."""
-    store = settings.harmonics_store_path(atlas=atlas)
-    if not store.exists():
-        raise FileNotFoundError(f"Harmonics store not found: {store}")
-    return xr.open_zarr(store)
+__all__ = [
+    "compute_laplacian_eigendecomposition",
+    "compute_graph_laplacian_eigen",
+    "compute_connectome_harmonics",
+    "compute_subject_harmonics",
+    "compute_harmonics_dataset",
+]

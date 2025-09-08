@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import logging
 import numpy as np
@@ -11,6 +11,14 @@ import scipy.io
 from ..settings import Settings
 
 logger = logging.getLogger(__name__)
+
+def load_matlab_file(filename: Path | str) -> Dict[str, Any]:
+    filename = str(filename)
+    data = scipy.io.loadmat(filename)
+    print("Data keys:")
+    print(list(data.keys()))
+    
+    return data
 
 
 def _infer_atlas_name(n_nodes: int) -> str:
@@ -26,9 +34,9 @@ def _build_connectivity_dataset(nets: np.ndarray, subject_ids: np.ndarray, *, at
     """Create an xarray Dataset for connectivity matrices.
 
     Dims and vars align with harmonics xarray conventions:
-    - dims: subject, node, node_2
-    - var:  connectivity(subject, node, node_2)
-    - coords: subject (subject_id), node (0..N-1), node_2 (0..N-1)
+    - dims: subject_id, node, node_2
+    - var:  connectivity(subject_id, node, node_2)
+    - coords: subject_id (primary key), node (0..N-1), node_2 (0..N-1)
     """
     if nets.ndim != 3:
         raise ValueError("'nets' must be a 3D array of connectivity matrices")
@@ -44,17 +52,17 @@ def _build_connectivity_dataset(nets: np.ndarray, subject_ids: np.ndarray, *, at
 
     ds = xr.Dataset(
         data_vars=dict(
-            connectivity=(("subject", "node", "node_2"), nets.transpose(2, 0, 1)),
+            connectivity=(("subject_id", "node", "node_2"), nets.transpose(2, 0, 1)),
         ),
         coords=dict(
-            subject=("subject", subject_ids.astype(np.int32)),
+            subject_id=("subject_id", subject_ids.astype(np.int32)),
             node=("node", np.arange(n_nodes, dtype=np.int32)),
             node_2=("node_2", np.arange(n_nodes, dtype=np.int32)),
         ),
         attrs={
             "atlas": atlas_name,
             "description": "DTI structural connectivity (fiber density)",
-            "layout": "subject,node,mode-compatible",
+            "layout": "subject_id,node,mode-compatible",
         },
     )
     return ds
@@ -65,7 +73,7 @@ def populate_connectivity_store(settings: Settings, *, overwrite: bool = False) 
 
     - Reads `nets` and `age` from the MATLAB file at `settings.camcan_raw`.
     - Builds an xarray Dataset with variable `connectivity(subject,node,node_2)`.
-    - Saves to `data/processed/connectivity_<atlas>.zarr` and returns the path.
+    - Saves to `data/processed/connectivity_<atlas>.nc` and returns the path.
 
     Notes on terminology: In diffusion MRI, these are typically called
     "structural connectivity" matrices (fiber density between regions).
@@ -135,19 +143,54 @@ def populate_connectivity_store(settings: Settings, *, overwrite: bool = False) 
     ds.to_netcdf(str(store), engine="scipy")
 
     rel = store.relative_to(settings.data_root) if store.is_absolute() else store
-    logger.info(f"Connectivity Zarr written at {rel}")
+    logger.info(f"Connectivity NetCDF written at {rel}")
     return store
 
 
 def open_connectivity_dataset(settings: Settings, atlas: Optional[str] = None) -> xr.Dataset:
-    """Open the saved connectivity store as an xarray Dataset.
-
-    If `atlas` is None, attempts the default CamCAN atlas naming based on node count.
-    """
+    """Open the saved connectivity store as an xarray Dataset (dims include 'subject_id')."""
     if atlas is None:
         # Best-effort default name for CamCAN
         atlas = "AAL-376"
     store = settings.processed_dir / f"connectivity_{atlas}.nc"
     if not store.exists():
         raise FileNotFoundError(f"Connectivity store not found: {store}")
+    return xr.open_dataset(store, engine="scipy")
+
+
+def open_harmonics_dataset(
+    settings: Settings,
+    *,
+    path: Optional[Union[str, Path]] = None,
+    atlas: Optional[str] = None,
+    lap_type: str = "normalized",
+    k: Optional[int] = None,
+    include_adjacency: bool = False,
+    binarize_threshold: Optional[float] = None,
+) -> xr.Dataset:
+    """Open a harmonics NetCDF dataset.
+
+    Options:
+    - If `path` is provided, opens that file directly.
+    - Otherwise, constructs the filename using the convention used in the notebook:
+        harmonics_{atlas}_{lap_type}_{k_slug}{pre}.nc
+      where k_slug is 'full' if k is None else f'k{k}', and pre includes
+      '_bin' if `binarize_threshold` is not None and '_noA' if not include_adjacency.
+    """
+    if path is not None:
+        store = Path(path)
+    else:
+        if atlas is None:
+            atlas = "AAL-376"
+        k_slug = "full" if k is None else f"k{k}"
+        pre = ""
+        if binarize_threshold is not None:
+            pre += "_bin"
+        if not include_adjacency:
+            pre += "_noA"
+        filename = f"harmonics_{atlas}_{lap_type}_{k_slug}{pre}.nc"
+        store = settings.processed_dir / filename
+
+    if not store.exists():
+        raise FileNotFoundError(f"Harmonics file not found: {store}")
     return xr.open_dataset(store, engine="scipy")
